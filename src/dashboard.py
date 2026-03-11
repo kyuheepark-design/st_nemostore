@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import go
+import plotly.graph_objects as go
 import sys
 import os
 
@@ -234,3 +234,4 @@ else:
         display_df = filtered_df.rename(columns=COLUMN_MAPPING)
         selected_cols = [COLUMN_MAPPING[k] for k in COLUMN_MAPPING.keys() if k in filtered_df.columns]
         st.dataframe(display_df[selected_cols], use_container_width=True)
+
