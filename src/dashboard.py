@@ -2,13 +2,107 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import sys
+import sqlite3
 import os
+import ast
+import sys
 
-# 배포 환경에서 모듈 임포트 경로 문제 해결
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 데이터베이스 경로 설정 (GitHub 업로드 경로 기준 상대 경로)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, '..', 'data', 'nemostore.db')
 
-from data_loader import load_data, filter_data, get_benchmarks, COLUMN_MAPPING
+# 컬럼명 한글 매핑
+COLUMN_MAPPING = {
+    'title': '매물명',
+    'businessMiddleCodeName': '업종',
+    'deposit': '보증금(만원)',
+    'monthlyRent': '월세(만원)',
+    'premium': '권리금(만원)',
+    'maintenanceFee': '관리비(만원)',
+    'size_m2': '면적(㎡)',
+    'size_py': '면적(평)',
+    'floor': '층수',
+    'nearSubwayStation': '주변역',
+    'viewCount': '조회수',
+    'favoriteCount': '관심수',
+    'createdDateUtc': '등록일'
+}
+
+@st.cache_data
+def load_data():
+    if not os.path.exists(DB_PATH):
+        # 만약 data 폴더가 루트에 있는 경우 대응
+        alt_path = os.path.join(BASE_DIR, 'data', 'nemostore.db')
+        target_path = DB_PATH if os.path.exists(DB_PATH) else alt_path
+        if not os.path.exists(target_path):
+            st.error(f"데이터베이스 파일을 찾을 수 없습니다: {DB_PATH}")
+            return pd.DataFrame()
+        path_to_use = target_path
+    else:
+        path_to_use = DB_PATH
+
+    conn = sqlite3.connect(path_to_use)
+    try:
+        df = pd.read_sql_query("SELECT * FROM items", conn)
+    except:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+    # 데이터 전처리
+    num_cols = ['deposit', 'monthlyRent', 'premium', 'maintenanceFee', 'viewCount', 'favoriteCount']
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    if 'size' in df.columns:
+        df['size_m2'] = df['size']
+        df['size_py'] = (df['size'] / 3.3058).round(1)
+
+    def parse_url_list(x):
+        try:
+            if isinstance(x, str) and x.startswith('['):
+                return ast.literal_eval(x)
+            return [x] if x else []
+        except:
+            return []
+
+    df['small_images'] = df['smallPhotoUrls'].apply(parse_url_list)
+    df['origin_images'] = df['originPhotoUrls'].apply(parse_url_list)
+    df['lat'] = 37.528 + (df.index % 100) * 0.0001
+    df['lon'] = 126.917 + (df.index % 100) * 0.0001
+    df['category'] = df['businessMiddleCodeName'].fillna('기타')
+
+    return df
+
+def get_benchmarks(df):
+    benchmarks = df.groupby('category').agg({
+        'deposit': 'mean',
+        'monthlyRent': 'mean',
+        'premium': 'mean',
+        'size_m2': 'mean'
+    }).reset_index()
+    benchmarks.columns = ['category', 'avg_deposit', 'avg_rent', 'avg_premium', 'avg_size']
+    return benchmarks
+
+def filter_data(df, search_term="", selected_categories=None, 
+                deposit_range=(0, 200000), rent_range=(0, 22000), 
+                premium_range=(0, 1000000), size_range=(0.0, 700.0)):
+    filtered_df = df.copy()
+    if search_term:
+        filtered_df = filtered_df[
+            filtered_df['title'].str.contains(search_term, case=False, na=False) |
+            filtered_df['category'].str.contains(search_term, case=False, na=False)
+        ]
+    if selected_categories:
+        filtered_df = filtered_df[filtered_df['category'].isin(selected_categories)]
+    filtered_df = filtered_df[
+        (filtered_df['deposit'] >= deposit_range[0]) & (filtered_df['deposit'] <= deposit_range[1]) &
+        (filtered_df['monthlyRent'] >= rent_range[0]) & (filtered_df['monthlyRent'] <= rent_range[1]) &
+        (filtered_df['premium'] >= premium_range[0]) & (filtered_df['premium'] <= premium_range[1]) &
+        (filtered_df['size_m2'] >= size_range[0]) & (filtered_df['size_m2'] <= size_range[1])
+    ]
+    return filtered_df
 import math
 
 # 페이지 설정
@@ -234,4 +328,3 @@ else:
         display_df = filtered_df.rename(columns=COLUMN_MAPPING)
         selected_cols = [COLUMN_MAPPING[k] for k in COLUMN_MAPPING.keys() if k in filtered_df.columns]
         st.dataframe(display_df[selected_cols], use_container_width=True)
-
