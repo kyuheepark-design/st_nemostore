@@ -1,7 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import go
+import sys
+import os
+
+# 배포 환경에서 모듈 임포트 경로 문제 해결
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from data_loader import load_data, filter_data, get_benchmarks, COLUMN_MAPPING
 import math
 
